@@ -10,14 +10,44 @@ Goal: ship a personal-assistant product on the OpenCode harness with **as little
 - `upstream` → `anomalyco/opencode`
 - **Default branch here is `main`.** Upstream’s default is `dev`.
 - Base feature branches and PRs on `origin/main`.
-- Sync from upstream with: `git fetch upstream` then merge or rebase `upstream/dev` into `main`. Prefer small, frequent syncs.
+- Prefer small, frequent syncs. **Do not merge upstream straight into `main` on a shared machine** — open a sync PR so `fork-pr` CI can run.
+
+### Upstream sync (how you get engine updates)
+
+```text
+anomalyco/opencode  dev
+        │  fetch
+        ▼
+  sync/upstream-<sha>   ← merge happens here
+        │  PR
+        ▼
+     origin/main        ← you merge after CI + review
+```
+
+**What you get:** core, protocol, plugins, permissions, automations, bugfixes, lockfile.
+
+**What stays inert:** their deploy/release/triage/Blacksmith workflows (gated to `anomalyco/opencode`). `fork-pr.yml` / `fork-sync.yml` stay yours.
+
+#### Automated (preferred)
+
+1. GitHub → **Actions** → **fork-sync** → **Run workflow**
+2. Optional: set `dry_run` to only print how many commits you’re behind
+3. Workflow merges `upstream/dev` onto `sync/upstream-<sha>`, re-applies workflow gates, opens a PR into `main`
+4. Wait for **fork-pr** CI → review → merge the sync PR
+
+If the merge conflicts, the workflow fails; resolve locally (below) and push the same branch pattern.
+
+#### Manual
 
 ```bash
 git remote add upstream https://github.com/anomalyco/opencode.git   # once
-git fetch upstream
-git checkout main
-git merge upstream/dev   # or rebase; resolve conflicts carefully
-git push origin main
+git fetch upstream dev
+git fetch origin main
+git checkout -B sync/upstream-$(git rev-parse --short upstream/dev) origin/main
+git merge upstream/dev
+bun script/fork/ensure-workflow-gates.ts
+git push -u origin HEAD
+gh pr create --base main --title "chore(fork): sync upstream/dev" --body "See AGENTS.fork.md"
 ```
 
 While GitHub is still “detaching” the fork, remotes and CI still work; wait for detach to finish before changing visibility or deleting the fork network link if that matters to you.
@@ -50,12 +80,13 @@ If you need a hook, keep the diff tiny (one import, one registration, one defaul
 | Workflow | Role |
 |----------|------|
 | `fork-pr.yml` | Lint, typecheck, Linux unit tests on PRs and pushes to `main` (ubuntu runners) |
+| `fork-sync.yml` | Manual Action: merge `upstream/dev` into a sync branch and open a PR to `main` |
 | Upstream `check.yml` / `check-test.yml` | Gated to `anomalyco/opencode` or `dev`/`beta` — do not rely on them here |
 | Upstream triage / deploy / release | Gated to `anomalyco/opencode` so they cannot close your PRs or need Blacksmith |
 
 Draft PRs skip `fork-pr` jobs. Mark ready for review when you want CI.
 
-After merging `upstream/dev`, if a triage or check workflow regains an unguarded job, re-apply `if: github.repository == 'anomalyco/opencode'` (or keep relying on `fork-pr.yml` only).
+`script/fork/ensure-workflow-gates.ts` runs after an automated sync (and you can run it after a manual merge) so upstream-only jobs keep `if: github.repository == 'anomalyco/opencode'`.
 
 ## Pull requests (this repo)
 

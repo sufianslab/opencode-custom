@@ -1,0 +1,134 @@
+name: fork-sync
+
+# Pull anomalyco/opencode `dev` into a review PR against this fork's `main`.
+# Does not merge to main. Excess upstream workflows stay in the tree; they remain
+# gated (see AGENTS.fork.md). Run manually: Actions → fork-sync → Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fetch and report commits only; do not push a branch or open a PR"
+        type: boolean
+        default: false
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: sync upstream/dev → PR
+    if: github.repository != 'anomalyco/opencode'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "opencode-custom-sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/anomalyco/opencode.git
+          git fetch upstream dev
+          git fetch origin main
+
+      - name: Summarize incoming commits
+        id: summary
+        run: |
+          ahead=$(git rev-list --count origin/main..upstream/dev)
+          echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+          echo "Upstream is $ahead commit(s) ahead of origin/main"
+          if [ "$ahead" -gt 0 ]; then
+            git log --oneline origin/main..upstream/dev | head -40
+          fi
+          echo "upstream_sha=$(git rev-parse upstream/dev)" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+
+      - name: Nothing to sync
+        if: steps.summary.outputs.ahead == '0'
+        run: echo "main already contains upstream/dev; done."
+
+      - name: Dry run stop
+        if: steps.summary.outputs.ahead != '0' && inputs.dry_run
+        run: |
+          echo "Dry run: would open a sync PR for ${{ steps.summary.outputs.ahead }} commit(s)."
+          echo "upstream=${{ steps.summary.outputs.upstream_sha }}"
+          echo "main=${{ steps.summary.outputs.main_sha }}"
+
+      - name: Merge upstream/dev onto a sync branch
+        id: merge
+        if: steps.summary.outputs.ahead != '0' && !inputs.dry_run
+        run: |
+          short=$(git rev-parse --short upstream/dev)
+          branch="sync/upstream-${short}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+          git checkout -B "$branch" origin/main
+          if git merge --no-edit upstream/dev; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            git merge --abort
+            echo "::error::Merge conflicts merging upstream/dev into main. Resolve locally (see AGENTS.fork.md)."
+            exit 1
+          fi
+
+      - name: Re-apply fork workflow gates
+        if: steps.summary.outputs.ahead != '0' && !inputs.dry_run && steps.merge.outputs.conflict == 'false'
+        env:
+          FORK_GATES_COMMIT: "1"
+        run: |
+          if command -v bun >/dev/null; then
+            bun script/fork/ensure-workflow-gates.ts
+          else
+            node --experimental-strip-types script/fork/ensure-workflow-gates.ts
+          fi
+
+      - name: Push sync branch
+        if: steps.summary.outputs.ahead != '0' && !inputs.dry_run && steps.merge.outputs.conflict == 'false'
+        run: |
+          git push -u origin "HEAD:${{ steps.merge.outputs.branch }}" --force-with-lease
+
+      - name: Open or update sync PR
+        if: steps.summary.outputs.ahead != '0' && !inputs.dry_run && steps.merge.outputs.conflict == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          AHEAD: ${{ steps.summary.outputs.ahead }}
+          UPSTREAM_SHA: ${{ steps.summary.outputs.upstream_sha }}
+        run: |
+          title="chore(fork): sync upstream/dev (${AHEAD} commits)"
+          body=$(cat <<EOF
+          ## Upstream sync
+
+          Automated merge of \`anomalyco/opencode\` **dev** (\`${UPSTREAM_SHA:0:7}\`) into **main**.
+
+          - Incoming commits: **${AHEAD}**
+          - Engine updates land in the tree; upstream deploy/triage/Blacksmith workflows stay gated.
+          - Review \`fork-*\` files and \`AGENTS.fork.md\` if this PR touches them.
+          - \`fork-pr\` CI should run on this PR before merge.
+
+          See \`AGENTS.fork.md\` → Upstream sync.
+          EOF
+          )
+
+          existing=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
+            echo "Updated PR #$existing"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$title" --body "$body"
+          fi
