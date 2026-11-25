@@ -1,29 +1,25 @@
-### Issue for this PR
-
-Closes #
-
 ### Type of change
 
 - [ ] Bug fix
-- [ ] New feature
+- [ ] New feature / product add-on
 - [ ] Refactor / code improvement
-- [ ] Documentation
+- [ ] Documentation / fork ops
+- [ ] Upstream sync
 
 ### What does this PR do?
 
-Please provide a description of the issue, the changes you made to fix it, and why they work. It is expected that you understand why your changes work and if you do not understand why at least say as much so a maintainer knows how much to value the PR.
+Short description in your own words. Prefer new paths over edits to upstream-critical files (see `AGENTS.fork.md`).
 
-**If you paste a large clearly AI generated description here your PR may be IGNORED or CLOSED!**
+### Core / upstream touch
 
-### How did you verify your code works?
+- [ ] No edits under `packages/core` session, permission, or automation (or explain the minimal hook below)
 
-### Screenshots / recordings
+### How did you verify?
 
-_If this is a UI change, please include a screenshot or recording._
+- [ ] `fork-pr` CI green, or local `bun run lint` + `bun run typecheck:tsc` (+ focused package tests)
 
 ### Checklist
 
-- [ ] I have tested my changes locally
-- [ ] I have not included unrelated changes in this PR
-
-_If you do not follow this template your PR will be automatically rejected._
+- [ ] Branched from `main`
+- [ ] No unrelated changes
+- [ ] No secrets in the diff
