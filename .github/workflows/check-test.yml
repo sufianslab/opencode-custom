@@ -50,7 +50,7 @@ jobs:
   # Only the browser suites need this, and pull requests run no browser suites.
   affected:
     name: affected packages
-    if: ${{ !github.event.pull_request.draft && github.event_name != 'pull_request' }}
+    if: ${{ github.repository == 'anomalyco/opencode' && !github.event.pull_request.draft && github.event_name != 'pull_request' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       e2e: ${{ steps.packages.outputs.app }}
@@ -79,7 +79,7 @@ jobs:
 
   unit:
     name: unit (${{ matrix.settings.name }})
-    if: ${{ !inputs.quarantine && !github.event.pull_request.draft }}
+    if: ${{ github.repository == 'anomalyco/opencode' && !inputs.quarantine && !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
@@ -158,7 +158,7 @@ jobs:
   build:
     name: build (${{ matrix.settings.name }})
     # Compiling the CLI and smoke-testing its service lifecycle is part of the full tier.
-    if: ${{ !inputs.quarantine && github.event_name != 'pull_request' && !github.event.pull_request.draft }}
+    if: ${{ github.repository == 'anomalyco/opencode' && !inputs.quarantine && github.event_name != 'pull_request' && !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
@@ -222,7 +222,7 @@ jobs:
   e2e-suite:
     name: e2e (${{ matrix.settings.name }}, ${{ matrix.suite.id }}${{ matrix.quarantine && ', quarantine' || '' }})
     needs: affected
-    if: needs.affected.outputs.e2e == 'true'
+    if: github.repository == 'anomalyco/opencode' && needs.affected.outputs.e2e == 'true'
     # Quarantined tests are known red; their legs report without failing the e2e checks.
     continue-on-error: ${{ matrix.quarantine }}
     strategy:
@@ -337,7 +337,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.os }})
     needs: [affected, e2e-suite]
-    if: ${{ !cancelled() && !inputs.quarantine && github.event_name != 'pull_request' && !github.event.pull_request.draft }}
+    if: ${{ github.repository == 'anomalyco/opencode' && !cancelled() && !inputs.quarantine && github.event_name != 'pull_request' && !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:

@@ -1,0 +1,104 @@
+name: fork-pr
+
+# PR and main checks for sufianslab/opencode-custom.
+# Upstream check.yml / check-test.yml target `dev` and Blacksmith runners; they are
+# gated off this fork. Keep this file in a fork-owned path so upstream merges stay easy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  AFFECTED: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+  TURBO_SCM_BASE: ${{ github.event_name == 'pull_request' && format('{0}^1', github.sha) || github.event.before }}
+  TURBO_SCM_HEAD: ${{ github.sha }}
+
+jobs:
+  check:
+    name: lint and typecheck
+    if: ${{ github.repository != 'anomalyco/opencode' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 2
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck (TypeScript 7.1)
+        run: bun run typecheck:tsc
+
+      - name: Lint changed files
+        if: github.event_name == 'pull_request'
+        run: bun run lint:changed HEAD^1
+
+  unit:
+    name: unit (linux)
+    if: ${{ github.repository != 'anomalyco/opencode' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Test Effect simplification rules
+        run: bun run test:effect-simplification-rules
+
+      - name: Check Effect simplifications
+        run: bun run lint:effect-simplifications
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode-custom.local"
+          git config --global user.name "opencode-custom"
+
+      - name: Run unit tests
+        timeout-minutes: 20
+        run: |
+          if [ "$AFFECTED" = "true" ]; then
+            GITHUB_ACTIONS=false bun turbo test --affected --concurrency=3
+            exit 0
+          fi
+          GITHUB_ACTIONS=false bun turbo test --concurrency=3
+
+      - name: Check generated client
+        working-directory: packages/client
+        run: bun run check:generated
+
+      - name: Check generated OpenAPI document
+        working-directory: packages/protocol
+        run: bun run check:generated
