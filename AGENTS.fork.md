@@ -86,6 +86,10 @@ If you need a hook, keep the diff tiny (one import, one registration, one defaul
 
 Draft PRs skip `fork-pr` jobs. Mark ready for review when you want CI.
 
+`pull_request_target` workflows (triage-*) run from the **base branch** (`main`), not the PR head. Their `github.repository == 'anomalyco/opencode'` gates must already be on `main`, or fork PRs fail before merge. After any sync that rewrites those files, land the gates on `main` before relying on PR CI.
+
+`fork-pr` installs system `ripgrep` on ubuntu runners. Upstream Blacksmith images often already have it; without it, core search/ripgrep tests fail with `ripgrep execution failed`.
+
 `script/fork/ensure-workflow-gates.ts` runs after an automated sync (and you can run it after a manual merge) so upstream-only jobs keep `if: github.repository == 'anomalyco/opencode'`.
 
 ## Pull requests (this repo)
